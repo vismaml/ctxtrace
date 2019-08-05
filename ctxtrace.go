@@ -78,9 +78,8 @@ func ExtractHTTP(r *http.Request) (TraceData, error) {
 	span, err := b3.ExtractHTTP(r)()
 	if err != nil {
 		return data, err
-	} else {
-		data.TraceSpan = span
 	}
+	data.TraceSpan = span
 	return data, nil
 }
 
