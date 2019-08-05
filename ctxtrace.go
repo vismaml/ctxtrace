@@ -48,7 +48,7 @@ func StreamServerInterceptor() grpc.StreamServerInterceptor {
 func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{},
 		cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		newCtx := newOutgoingContextWithData(ctx)
+		newCtx := NewOutgoingContextWithData(ctx)
 		return invoker(newCtx, method, req, reply, cc, opts...)
 	}
 }
@@ -57,18 +57,18 @@ func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 func StreamClientInterceptor() grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn,
 		method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-		newCtx := newOutgoingContextWithData(ctx)
+		newCtx := NewOutgoingContextWithData(ctx)
 		return streamer(newCtx, desc, cc, method, opts...)
 	}
 }
 
 // Extract extracts metadata from the context.
-func Extract(ctx context.Context) *TraceData {
+func Extract(ctx context.Context) TraceData {
 	data, ok := ctx.Value(traceCtxMarker{}).(TraceData)
 	if !ok {
-		return &TraceData{}
+		return TraceData{}
 	}
-	return &data
+	return data
 }
 
 // ExtractHTTP extracts metadata from a normal http request
@@ -83,6 +83,12 @@ func ExtractHTTP(r *http.Request) (TraceData, error) {
 	}
 	data.TraceSpan = span
 	return data, nil
+}
+
+// ExtractHTTPToContext extracts metadata from a normal http request and adds it to the context
+func ExtractHTTPToContext(ctx context.Context, r *http.Request) context.Context {
+	data, _ := ExtractHTTP(r)
+	return context.WithValue(ctx, traceCtxMarker{}, data)
 }
 
 // finds caller information in the gRPC metadata and adds it to the context
@@ -107,23 +113,28 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, traceCtxMarker{}, data)
 }
 
-// newOutgoingContextWithData creates a new context with the metadata added
-func newOutgoingContextWithData(ctx context.Context) context.Context {
+// NewOutgoingContextWithData creates a new context with the metadata added
+func NewOutgoingContextWithData(ctx context.Context) context.Context {
+	md := InjectDataIntoOutMetadata(ctx, Extract(ctx))
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// InjectDataIntoMetadata injects the given trace data into metadata fit for an outgoing context
+func InjectDataIntoOutMetadata(ctx context.Context, data TraceData) metadata.MD {
 	md, mdOK := metadata.FromOutgoingContext(ctx)
 	if !mdOK {
 		md = metadata.New(nil)
 	}
-	packCallerMetadata(ctx, &md)
-	return metadata.NewOutgoingContext(ctx, md)
+	packCallerMetadata(&md, Extract(ctx))
+	return md
 }
 
 // packCallerMetadata extracts caller specific values from the context,
 // into a MD metadata struct that can be propagated with outgoing gRPC requests
-func packCallerMetadata(ctx context.Context, m *metadata.MD) {
+func packCallerMetadata(m *metadata.MD, data TraceData) {
 	if m == nil {
 		zap.L().Fatal("metadata is nil", zap.Stack("stack"))
 	}
-	data := Extract(ctx)
 	if data.TraceSpan != nil {
 		err := b3.InjectGRPC(m)(*data.TraceSpan)
 		if err != nil {
