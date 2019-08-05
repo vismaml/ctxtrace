@@ -2,6 +2,7 @@ package ctxtrace
 
 import (
 	"context"
+	"net/http"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
@@ -60,13 +61,27 @@ func StreamClientInterceptor() grpc.StreamClientInterceptor {
 	}
 }
 
-// Extract extracts metadate from the context.
+// Extract extracts metadata from the context.
 func Extract(ctx context.Context) *TraceData {
 	data, ok := ctx.Value(traceCtxMarker{}).(TraceData)
 	if !ok {
 		return &TraceData{}
 	}
 	return &data
+}
+
+func ExtractHTTP(r *http.Request) (TraceData, error) {
+	data := TraceData{}
+	if reqID := r.Header.Get(headerRequestID); reqID != "" {
+		data.RequestID = reqID
+	}
+	span, err := b3.ExtractHTTP(r)()
+	if err != nil {
+		return data, err
+	} else {
+		data.TraceSpan = span
+	}
+	return data, nil
 }
 
 // finds caller information in the gRPC metadata and adds it to the context
@@ -115,6 +130,6 @@ func packCallerMetadata(ctx context.Context, m *metadata.MD) {
 		}
 	}
 	if data.RequestID != "" {
-		(*m)[headerRequestID] = []string{data.RequestID}
+		m.Set(headerRequestID, data.RequestID)
 	}
 }
