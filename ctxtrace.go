@@ -17,6 +17,7 @@ const (
 	headerRequestID = "x-request-id"
 )
 
+// TraceData is a simple struct to hold both the RequestID and the B3 TraceSpan
 type TraceData struct {
 	RequestID string
 	TraceSpan *model.SpanContext
@@ -70,6 +71,7 @@ func Extract(ctx context.Context) *TraceData {
 	return &data
 }
 
+// ExtractHTTP extracts metadata from a normal http request
 func ExtractHTTP(r *http.Request) (TraceData, error) {
 	data := TraceData{}
 	if reqID := r.Header.Get(headerRequestID); reqID != "" {
