@@ -107,7 +107,7 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 
 	if mdValue, ok := md[headerRequestID]; ok && len(mdValue) != 0 {
 		data.RequestID = mdValue[0]
-		grpc_ctxtags.Extract(ctx).Set("requestid", mdValue[0])
+		grpc_ctxtags.Extract(ctx).Set("request_id", mdValue[0])
 	}
 
 	return context.WithValue(ctx, traceCtxMarker{}, data)
