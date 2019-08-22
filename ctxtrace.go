@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	headerRequestID = "x-request-id"
+	headerRequestID = "request_id"
 )
 
 // TraceData is a simple struct to hold both the RequestID and the B3 TraceSpan
