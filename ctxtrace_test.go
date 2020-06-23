@@ -16,13 +16,6 @@ const (
 	dummyRequestID = "Foo"
 )
 
-type traceContextKeyType int
-
-const (
-	currentSpanKey traceContextKeyType = iota
-	remoteContextKey
-)
-
 func TestPackMetadata(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
