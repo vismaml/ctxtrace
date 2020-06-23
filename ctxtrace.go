@@ -151,7 +151,7 @@ func NewOutgoingContextWithData(ctx context.Context) context.Context {
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
-// InjectDataIntoMetadata injects the given trace data into metadata fit for an outgoing context
+// InjectDataIntoOutMetadata injects the given trace data into metadata fit for an outgoing context
 func InjectDataIntoOutMetadata(ctx context.Context, data TraceData) metadata.MD {
 	md, mdOK := metadata.FromOutgoingContext(ctx)
 	if !mdOK {
