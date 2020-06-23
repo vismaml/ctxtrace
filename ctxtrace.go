@@ -8,6 +8,7 @@ import (
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
 	"github.com/openzipkin/zipkin-go/model"
 	"github.com/openzipkin/zipkin-go/propagation/b3"
+	"go.opentelemetry.io/otel/api/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -91,6 +92,32 @@ func ExtractHTTPToContext(ctx context.Context, r *http.Request) context.Context 
 	return context.WithValue(ctx, traceCtxMarker{}, data)
 }
 
+func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) (context.Context, error) {
+	traceIDString := traceData.TraceSpan.TraceID.String()
+	traceID, err := trace.IDFromHex(traceIDString)
+
+	if err != nil {
+		return ctx, err
+	}
+
+	spanIDString := traceData.TraceSpan.ID.String()
+	spanID, err := trace.SpanIDFromHex(spanIDString)
+
+	if err != nil {
+		return ctx, err
+	}
+
+	traceFlags := trace.FlagsUnused
+	if *traceData.TraceSpan.Sampled {
+		traceFlags = trace.FlagsSampled
+	}
+
+	spanContext := trace.SpanContext{TraceID: traceID, SpanID: spanID, TraceFlags: traceFlags}
+	ctx = trace.ContextWithRemoteSpanContext(ctx, spanContext)
+
+	return ctx, nil
+}
+
 // finds caller information in the gRPC metadata and adds it to the context
 func extractMetadataToContext(ctx context.Context) context.Context {
 	md, mdOK := metadata.FromIncomingContext(ctx)
@@ -103,6 +130,11 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 		zap.L().Warn("b3 extract failed", zap.Error(err))
 	} else {
 		data.TraceSpan = span
+
+		ctx, err = addOtelSpanContextToContext(ctx, data)
+		if err != nil {
+			zap.L().Warn("opentelemetry context failed", zap.Error(err))
+		}
 	}
 
 	if mdValue, ok := md[headerRequestID]; ok && len(mdValue) != 0 {
@@ -119,7 +151,7 @@ func NewOutgoingContextWithData(ctx context.Context) context.Context {
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
-// InjectDataIntoMetadata injects the given trace data into metadata fit for an outgoing context
+// InjectDataIntoOutMetadata injects the given trace data into metadata fit for an outgoing context
 func InjectDataIntoOutMetadata(ctx context.Context, data TraceData) metadata.MD {
 	md, mdOK := metadata.FromOutgoingContext(ctx)
 	if !mdOK {
