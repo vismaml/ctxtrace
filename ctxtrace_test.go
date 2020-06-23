@@ -46,7 +46,7 @@ func TestOpenTelemetryContextNotSmapled(t *testing.T) {
 	data, err := ExtractHTTP(r)
 	assert.Nil(t, err)
 
-	ctx, err = openTelemetryContext(ctx, data)
+	ctx, err = addOtelSpanContextToContext(ctx, data)
 	assert.Nil(t, err)
 
 	spanContext := trace.RemoteSpanContextFromContext(ctx)
@@ -69,7 +69,7 @@ func TestOpenTelemetryContextSmapled(t *testing.T) {
 	data, err := ExtractHTTP(r)
 	assert.Nil(t, err)
 
-	ctx, err = openTelemetryContext(ctx, data)
+	ctx, err = addOtelSpanContextToContext(ctx, data)
 	assert.Nil(t, err)
 
 	spanContext := trace.RemoteSpanContextFromContext(ctx)

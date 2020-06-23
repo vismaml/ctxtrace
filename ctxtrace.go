@@ -92,7 +92,7 @@ func ExtractHTTPToContext(ctx context.Context, r *http.Request) context.Context 
 	return context.WithValue(ctx, traceCtxMarker{}, data)
 }
 
-func openTelemetryContext(ctx context.Context, traceData TraceData) (context.Context, error) {
+func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) (context.Context, error) {
 	traceIDString := traceData.TraceSpan.TraceID.String()
 	traceID, err := trace.IDFromHex(traceIDString)
 
@@ -131,7 +131,7 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 	} else {
 		data.TraceSpan = span
 
-		ctx, err = openTelemetryContext(ctx, data)
+		ctx, err = addOtelSpanContextToContext(ctx, data)
 		if err != nil {
 			zap.L().Warn("opentelemetry context failed", zap.Error(err))
 		}
