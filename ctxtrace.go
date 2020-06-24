@@ -92,19 +92,17 @@ func ExtractHTTPToContext(ctx context.Context, r *http.Request) context.Context 
 	return context.WithValue(ctx, traceCtxMarker{}, data)
 }
 
-func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) (context.Context, error) {
+func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) context.Context {
 	traceIDString := traceData.TraceSpan.TraceID.String()
 	traceID, err := trace.IDFromHex(traceIDString)
-
 	if err != nil {
-		return ctx, err
+		return ctx
 	}
 
 	spanIDString := traceData.TraceSpan.ID.String()
 	spanID, err := trace.SpanIDFromHex(spanIDString)
-
 	if err != nil {
-		return ctx, err
+		return ctx
 	}
 
 	traceFlags := trace.FlagsUnused
@@ -113,9 +111,11 @@ func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) (cont
 	}
 
 	spanContext := trace.SpanContext{TraceID: traceID, SpanID: spanID, TraceFlags: traceFlags}
-	ctx = trace.ContextWithRemoteSpanContext(ctx, spanContext)
+	if !spanContext.IsValid() {
+		return ctx
+	}
 
-	return ctx, nil
+	return trace.ContextWithRemoteSpanContext(ctx, spanContext)
 }
 
 // finds caller information in the gRPC metadata and adds it to the context
@@ -130,11 +130,7 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 		zap.L().Warn("b3 extract failed", zap.Error(err))
 	} else {
 		data.TraceSpan = span
-
-		ctx, err = addOtelSpanContextToContext(ctx, data)
-		if err != nil {
-			zap.L().Warn("opentelemetry context failed", zap.Error(err))
-		}
+		ctx = addOtelSpanContextToContext(ctx, data)
 	}
 
 	if mdValue, ok := md[headerRequestID]; ok && len(mdValue) != 0 {
