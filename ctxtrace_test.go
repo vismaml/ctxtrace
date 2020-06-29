@@ -34,7 +34,7 @@ func TestPackMetadata(t *testing.T) {
 	}
 }
 
-func TestOpenTelemetryContextNotSmapled(t *testing.T) {
+func TestAddOtelSpanContextToContext_NotSmapled(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)
 	r.Header.Set(headerRequestID, dummyRequestID)
 	r.Header.Set(b3.ParentSpanID, "0716f381a10c2a9b")
@@ -46,8 +46,7 @@ func TestOpenTelemetryContextNotSmapled(t *testing.T) {
 	data, err := ExtractHTTP(r)
 	assert.Nil(t, err)
 
-	ctx, err = addOtelSpanContextToContext(ctx, data)
-	assert.Nil(t, err)
+	ctx = addOtelSpanContextToContext(ctx, data)
 
 	spanContext := trace.RemoteSpanContextFromContext(ctx)
 
@@ -57,7 +56,7 @@ func TestOpenTelemetryContextNotSmapled(t *testing.T) {
 	assert.Equal(t, spanContext.TraceID.String(), data.TraceSpan.TraceID.String())
 }
 
-func TestOpenTelemetryContextSmapled(t *testing.T) {
+func TestAddOtelSpanContextToContext_Smapled(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)
 	r.Header.Set(headerRequestID, dummyRequestID)
 	r.Header.Set(b3.ParentSpanID, "0716f381a10c2a9b")
@@ -69,8 +68,7 @@ func TestOpenTelemetryContextSmapled(t *testing.T) {
 	data, err := ExtractHTTP(r)
 	assert.Nil(t, err)
 
-	ctx, err = addOtelSpanContextToContext(ctx, data)
-	assert.Nil(t, err)
+	ctx = addOtelSpanContextToContext(ctx, data)
 
 	spanContext := trace.RemoteSpanContextFromContext(ctx)
 
@@ -78,6 +76,28 @@ func TestOpenTelemetryContextSmapled(t *testing.T) {
 	assert.Equal(t, spanContext.TraceFlags, trace.FlagsSampled)
 	assert.Equal(t, spanContext.SpanID.String(), data.TraceSpan.ID.String())
 	assert.Equal(t, spanContext.TraceID.String(), data.TraceSpan.TraceID.String())
+}
+
+func TestAddOtelSpanContextToContext_InvalidParent(t *testing.T) {
+	r := httptest.NewRequest("GET", "/foo", nil)
+	r.Header.Set(headerRequestID, dummyRequestID)
+	r.Header.Set(b3.ParentSpanID, "")
+	r.Header.Set(b3.Sampled, "1")
+	r.Header.Set(b3.SpanID, "")
+	r.Header.Set(b3.TraceID, "")
+
+	ctx := context.Background()
+	data, err := ExtractHTTP(r)
+	assert.Nil(t, err)
+
+	ctx = addOtelSpanContextToContext(ctx, data)
+
+	// If there's no spanContext in the ctx, default EmptySpanContext is returned
+	spanContext := trace.RemoteSpanContextFromContext(ctx)
+
+	assert.NotNil(t, spanContext)
+	assert.False(t, spanContext.IsValid())
+	assert.Equal(t, spanContext, trace.EmptySpanContext())
 }
 
 func TestExtractHTTP(t *testing.T) {
