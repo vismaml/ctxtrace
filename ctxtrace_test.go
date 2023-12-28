@@ -8,13 +8,14 @@ import (
 
 	"github.com/openzipkin/zipkin-go/propagation/b3"
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/otel/api/trace"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/metadata"
 )
 
 const (
 	dummyRequestID = "Foo"
 )
+
 
 func TestPackMetadata(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
@@ -34,6 +35,7 @@ func TestPackMetadata(t *testing.T) {
 	}
 }
 
+
 func TestAddOtelSpanContextToContext_NotSmapled(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)
 	r.Header.Set(headerRequestID, dummyRequestID)
@@ -48,13 +50,14 @@ func TestAddOtelSpanContextToContext_NotSmapled(t *testing.T) {
 
 	ctx = addOtelSpanContextToContext(ctx, data)
 
-	spanContext := trace.RemoteSpanContextFromContext(ctx)
+	spanContext := trace.SpanContextFromContext(ctx)
 
 	assert.NotNil(t, spanContext)
-	assert.Equal(t, spanContext.TraceFlags, trace.FlagsUnused)
-	assert.Equal(t, spanContext.SpanID.String(), data.TraceSpan.ID.String())
-	assert.Equal(t, spanContext.TraceID.String(), data.TraceSpan.TraceID.String())
+	assert.Equal(t, spanContext.TraceFlags(), trace.TraceFlags(0))
+	assert.Equal(t, spanContext.SpanID().String(), data.TraceSpan.ID.String())
+	assert.Equal(t, spanContext.TraceID().String(), data.TraceSpan.TraceID.String())
 }
+
 
 func TestAddOtelSpanContextToContext_Smapled(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)
@@ -70,12 +73,12 @@ func TestAddOtelSpanContextToContext_Smapled(t *testing.T) {
 
 	ctx = addOtelSpanContextToContext(ctx, data)
 
-	spanContext := trace.RemoteSpanContextFromContext(ctx)
+	spanContext := trace.SpanContextFromContext(ctx)
 
 	assert.NotNil(t, spanContext)
-	assert.Equal(t, spanContext.TraceFlags, trace.FlagsSampled)
-	assert.Equal(t, spanContext.SpanID.String(), data.TraceSpan.ID.String())
-	assert.Equal(t, spanContext.TraceID.String(), data.TraceSpan.TraceID.String())
+	assert.Equal(t, spanContext.TraceFlags(), trace.TraceFlags(1))
+	assert.Equal(t, spanContext.SpanID().String(), data.TraceSpan.ID.String())
+	assert.Equal(t, spanContext.TraceID().String(), data.TraceSpan.TraceID.String())
 }
 
 func TestAddOtelSpanContextToContext_InvalidParent(t *testing.T) {
@@ -93,12 +96,13 @@ func TestAddOtelSpanContextToContext_InvalidParent(t *testing.T) {
 	ctx = addOtelSpanContextToContext(ctx, data)
 
 	// If there's no spanContext in the ctx, default EmptySpanContext is returned
-	spanContext := trace.RemoteSpanContextFromContext(ctx)
+	spanContext := trace.SpanContextFromContext(ctx)
 
 	assert.NotNil(t, spanContext)
 	assert.False(t, spanContext.IsValid())
-	assert.Equal(t, spanContext, trace.EmptySpanContext())
+	assert.Equal(t, spanContext, trace.SpanContext{})
 }
+
 
 func TestExtractHTTP(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)

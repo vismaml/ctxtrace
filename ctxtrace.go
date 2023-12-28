@@ -8,7 +8,7 @@ import (
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
 	"github.com/openzipkin/zipkin-go/model"
 	"github.com/openzipkin/zipkin-go/propagation/b3"
-	"go.opentelemetry.io/otel/api/trace"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -94,7 +94,7 @@ func ExtractHTTPToContext(ctx context.Context, r *http.Request) context.Context 
 
 func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) context.Context {
 	traceIDString := traceData.TraceSpan.TraceID.String()
-	traceID, err := trace.IDFromHex(traceIDString)
+	traceID, err := trace.TraceIDFromHex(traceIDString)
 	if err != nil {
 		return ctx
 	}
@@ -105,12 +105,17 @@ func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) conte
 		return ctx
 	}
 
-	traceFlags := trace.FlagsUnused
+	var traceFlags trace.TraceFlags
 	if *traceData.TraceSpan.Sampled {
 		traceFlags = trace.FlagsSampled
 	}
-
-	spanContext := trace.SpanContext{TraceID: traceID, SpanID: spanID, TraceFlags: traceFlags}
+	spanContext := trace.NewSpanContext(
+		trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     spanID,
+			TraceFlags: traceFlags,
+		},
+	)
 	if !spanContext.IsValid() {
 		return ctx
 	}
