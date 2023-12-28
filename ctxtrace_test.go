@@ -16,7 +16,6 @@ const (
 	dummyRequestID = "Foo"
 )
 
-
 func TestPackMetadata(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
@@ -34,7 +33,6 @@ func TestPackMetadata(t *testing.T) {
 		}
 	}
 }
-
 
 func TestAddOtelSpanContextToContext_NotSmapled(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)
@@ -57,7 +55,6 @@ func TestAddOtelSpanContextToContext_NotSmapled(t *testing.T) {
 	assert.Equal(t, spanContext.SpanID().String(), data.TraceSpan.ID.String())
 	assert.Equal(t, spanContext.TraceID().String(), data.TraceSpan.TraceID.String())
 }
-
 
 func TestAddOtelSpanContextToContext_Smapled(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)
@@ -102,7 +99,6 @@ func TestAddOtelSpanContextToContext_InvalidParent(t *testing.T) {
 	assert.False(t, spanContext.IsValid())
 	assert.Equal(t, spanContext, trace.SpanContext{})
 }
-
 
 func TestExtractHTTP(t *testing.T) {
 	r := httptest.NewRequest("GET", "/foo", nil)

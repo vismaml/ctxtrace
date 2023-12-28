@@ -30,6 +30,7 @@ type traceCtxMarker struct{}
 func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		ctx = extractMetadataToContext(ctx)
+
 		return handler(ctx, req)
 	}
 }
@@ -41,6 +42,7 @@ func StreamServerInterceptor() grpc.StreamServerInterceptor {
 		ctx := stream.Context()
 		wrapped := grpc_middleware.WrapServerStream(stream)
 		wrapped.WrappedContext = extractMetadataToContext(ctx)
+
 		return handler(srv, wrapped)
 	}
 }
@@ -105,11 +107,12 @@ func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) conte
 		return ctx
 	}
 
-	var traceFlags trace.TraceFlags
+	traceFlags := trace.TraceFlags(0)
 	if *traceData.TraceSpan.Sampled {
 		traceFlags = trace.FlagsSampled
 	}
 	spanContext := trace.NewSpanContext(
+		//TODO: add tracestate, remote
 		trace.SpanContextConfig{
 			TraceID:    traceID,
 			SpanID:     spanID,
