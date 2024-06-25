@@ -181,3 +181,8 @@ func packCallerMetadata(m *metadata.MD, data TraceData) {
 		m.Set(headerRequestID, data.RequestID)
 	}
 }
+
+// WithValue Creates context with TraceData values
+func WithValue(ctx context.Context, traceData TraceData) context.Context {
+	return context.WithValue(ctx, traceCtxMarker{}, traceData)
+}
