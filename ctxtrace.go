@@ -174,7 +174,8 @@ func packCallerMetadata(m *metadata.MD, data TraceData) {
 	if data.TraceSpan != nil {
 		err := b3.InjectGRPC(m)(*data.TraceSpan)
 		if err != nil {
-			zap.L().Warn("b3 injection failed", zap.Error(err))
+			zap.L().Debug("b3 injection failed", zap.Error(err))
+			// Dont pollute logs with this error, it is not critical
 		}
 	}
 	if data.RequestID != "" {
