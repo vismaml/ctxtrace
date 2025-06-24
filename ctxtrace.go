@@ -35,6 +35,54 @@ type traceCtxMarker struct{}
 // UnaryServerInterceptor for propagating client information
 func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return handler(ctx, req)
+		}
+
+		// Check if we have Cloud Trace but no B3
+		cloudTraceHeaders := md["x-cloud-trace-context"]
+		b3TraceHeaders := md["x-b3-traceid"]
+
+		if len(cloudTraceHeaders) > 0 && len(b3TraceHeaders) == 0 {
+			// Parse Google Cloud Trace format: "TRACE_ID/SPAN_ID;o=OPTIONS"
+			parts := strings.Split(cloudTraceHeaders[0], "/")
+			if len(parts) >= 2 {
+				traceID := parts[0]
+				spanParts := strings.Split(parts[1], ";")
+				spanIDStr := spanParts[0]
+
+				// Convert decimal span ID to hexadecimal
+				spanIDDecimal, err := strconv.ParseUint(spanIDStr, 10, 64)
+				if err != nil {
+					zap.L().Warn("failed to parse span ID as decimal",
+						zap.String("span_id", spanIDStr),
+						zap.Error(err),
+					)
+					return handler(ctx, req)
+				}
+
+				spanIDHex := strconv.FormatUint(spanIDDecimal, 16)
+
+				// Convert to B3 format and add to metadata
+				newMD := metadata.Join(md, metadata.New(map[string]string{
+					"x-b3-traceid": traceID,
+					"x-b3-spanid":  spanIDHex,
+					"x-b3-sampled": "1",
+				}))
+
+				ctx = metadata.NewIncomingContext(ctx, newMD)
+
+				zap.L().Debug("converted cloud trace to b3",
+					zap.String("method", info.FullMethod),
+					zap.String("cloud_trace", cloudTraceHeaders[0]),
+					zap.String("b3_traceid", traceID),
+					zap.String("span_id_decimal", spanIDStr),
+					zap.String("b3_spanid_hex", spanIDHex),
+				)
+			}
+		}
+
 		ctx = extractMetadataToContext(ctx)
 
 		return handler(ctx, req)
@@ -139,32 +187,12 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 		return ctx
 	}
 	data := TraceData{}
-
 	span, err := b3.ExtractGRPC(&md)()
 	if err != nil {
-		zap.L().Warn("b3 extract failed, attempting cloud trace conversion", zap.Error(err))
-
-		// If B3 extraction failed, try converting from Cloud Trace
-		if convertedMD := tryConvertCloudTraceToB3(md); convertedMD != nil {
-			// Update context with converted metadata
-			ctx = metadata.NewIncomingContext(ctx, *convertedMD)
-			md = *convertedMD
-
-			zap.L().Warn("attempting B3 extraction after cloud trace conversion",
-				zap.Any("converted_headers", md[headerB3TraceID]),
-				zap.Any("span_headers", md[headerB3SpanID]),
-			)
-
-			// Try B3 extraction again with converted headers
-			span, err = b3.ExtractGRPC(&md)()
-			if err != nil {
-				zap.L().Warn("b3 extract failed even after cloud trace conversion", zap.Error(err))
-			} else {
-				data.TraceSpan = span
-				ctx = addOtelSpanContextToContext(ctx, data)
-			}
+		if err.Error() == "empty request context" {
+			zap.L().Debug("b3 extract failed", zap.Error(err))
 		} else {
-			zap.L().Warn("b3 extract failed and no cloud trace headers found", zap.Error(err))
+			zap.L().Warn("b3 extract failed", zap.Error(err))
 		}
 	} else {
 		data.TraceSpan = span
@@ -215,65 +243,4 @@ func packCallerMetadata(m *metadata.MD, data TraceData) {
 // WithValue Creates context with TraceData values
 func WithValue(ctx context.Context, traceData TraceData) context.Context {
 	return context.WithValue(ctx, traceCtxMarker{}, traceData)
-}
-
-// tryConvertCloudTraceToB3 attempts to convert Google Cloud Trace headers to B3 format
-// Returns nil if no conversion is possible or needed
-func tryConvertCloudTraceToB3(md metadata.MD) *metadata.MD {
-	// Check if we have Cloud Trace headers
-	cloudTraceHeaders := md[headerCloudTrace]
-	if len(cloudTraceHeaders) == 0 {
-		zap.L().Warn("no cloud trace headers found")
-		return nil
-	}
-
-	// Check if we already have B3 headers - don't convert if they exist
-	b3TraceHeaders := md[headerB3TraceID]
-	if len(b3TraceHeaders) > 0 {
-		zap.L().Warn("B3 headers already exist, skipping conversion")
-		return nil
-	}
-
-	zap.L().Warn("converting cloud trace to B3",
-		zap.String("cloud_trace", cloudTraceHeaders[0]),
-	)
-
-	// Parse Google Cloud Trace format: "TRACE_ID/SPAN_ID;o=OPTIONS"
-	parts := strings.Split(cloudTraceHeaders[0], "/")
-	if len(parts) < 2 {
-		zap.L().Warn("invalid cloud trace format", zap.String("header", cloudTraceHeaders[0]))
-		return nil
-	}
-
-	traceID := parts[0]
-	spanParts := strings.Split(parts[1], ";")
-	spanIDStr := spanParts[0]
-
-	// Convert decimal span ID to hexadecimal
-	spanIDDecimal, err := strconv.ParseUint(spanIDStr, 10, 64)
-	if err != nil {
-		zap.L().Warn("failed to parse span ID as decimal",
-			zap.String("span_id", spanIDStr),
-			zap.Error(err),
-		)
-		return nil
-	}
-
-	spanIDHex := strconv.FormatUint(spanIDDecimal, 16)
-
-	// Create new metadata with B3 headers added
-	newMD := metadata.Join(md, metadata.New(map[string]string{
-		headerB3TraceID: traceID,
-		headerB3SpanID:  spanIDHex,
-		headerB3Sampled: "1",
-	}))
-
-	zap.L().Warn("converted cloud trace to b3",
-		zap.String("cloud_trace", cloudTraceHeaders[0]),
-		zap.String("b3_traceid", traceID),
-		zap.String("span_id_decimal", spanIDStr),
-		zap.String("b3_spanid_hex", spanIDHex),
-	)
-
-	return &newMD
 }
