@@ -3,6 +3,8 @@ package ctxtrace
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"strings"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
@@ -18,6 +20,8 @@ const (
 	headerRequestID  = "x-request-id"
 	headerCloudTrace = "x-cloud-trace-context"
 	headerB3TraceID  = "x-b3-traceid"
+	headerB3SpanID   = "x-b3-spanid"
+	headerB3Sampled  = "x-b3-sampled"
 )
 
 // TraceData is a simple struct to hold both the RequestID and the B3 TraceSpan
@@ -134,44 +138,32 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 	if !mdOK {
 		return ctx
 	}
-
 	data := TraceData{}
-
-	// Check what headers we have for logging
-	hasB3 := len(md[headerB3TraceID]) > 0
-	hasCloudTrace := len(md[headerCloudTrace]) > 0
-
-	// Log the header types detected
-	if hasB3 && hasCloudTrace {
-		zap.L().Info("incoming request has both trace formats",
-			zap.Bool("has_b3_headers", hasB3),
-			zap.Bool("has_cloud_trace_headers", hasCloudTrace),
-		)
-	} else if hasB3 {
-		zap.L().Info("incoming request has B3 trace headers")
-	} else if hasCloudTrace {
-		zap.L().Info("incoming request has Cloud Trace headers")
-	} else {
-		zap.L().Debug("incoming request has no trace headers")
-	}
 
 	span, err := b3.ExtractGRPC(&md)()
 	if err != nil {
-		if hasCloudTrace {
-			zap.L().Warn("b3 extract failed but cloud trace headers present",
-				zap.Error(err),
-				zap.Strings("cloud_trace_headers", md[headerCloudTrace]),
-			)
+		zap.L().Debug("b3 extract failed, attempting cloud trace conversion", zap.Error(err))
+
+		// If B3 extraction failed, try converting from Cloud Trace
+		if convertedMD := tryConvertCloudTraceToB3(md); convertedMD != nil {
+			// Update context with converted metadata
+			ctx = metadata.NewIncomingContext(ctx, *convertedMD)
+			md = *convertedMD
+
+			// Try B3 extraction again with converted headers
+			span, err = b3.ExtractGRPC(&md)()
+			if err != nil {
+				zap.L().Warn("b3 extract failed even after cloud trace conversion", zap.Error(err))
+			} else {
+				data.TraceSpan = span
+				ctx = addOtelSpanContextToContext(ctx, data)
+			}
 		} else {
-			zap.L().Warn("b3 extract failed", zap.Error(err))
+			zap.L().Warn("b3 extract failed and no cloud trace headers found", zap.Error(err))
 		}
 	} else {
 		data.TraceSpan = span
 		ctx = addOtelSpanContextToContext(ctx, data)
-		zap.L().Info("b3 trace extraction successful",
-			zap.String("trace_id", span.TraceID.String()),
-			zap.String("span_id", span.ID.String()),
-		)
 	}
 
 	if mdValue, ok := md[headerRequestID]; ok && len(mdValue) != 0 {
@@ -218,4 +210,46 @@ func packCallerMetadata(m *metadata.MD, data TraceData) {
 // WithValue Creates context with TraceData values
 func WithValue(ctx context.Context, traceData TraceData) context.Context {
 	return context.WithValue(ctx, traceCtxMarker{}, traceData)
+}
+
+// tryConvertCloudTraceToB3 attempts to convert Google Cloud Trace headers to B3 format
+// Returns nil if no conversion is possible or needed
+func tryConvertCloudTraceToB3(md metadata.MD) *metadata.MD {
+	// Check if we have Cloud Trace headers
+	cloudTraceHeaders := md[headerCloudTrace]
+	if len(cloudTraceHeaders) == 0 {
+		return nil
+	}
+
+	// Parse Google Cloud Trace format: "TRACE_ID/SPAN_ID;o=OPTIONS"
+	parts := strings.Split(cloudTraceHeaders[0], "/")
+	if len(parts) < 2 {
+		zap.L().Warn("invalid cloud trace format", zap.String("header", cloudTraceHeaders[0]))
+		return nil
+	}
+
+	traceID := parts[0]
+	spanParts := strings.Split(parts[1], ";")
+	spanIDStr := spanParts[0]
+
+	// Convert decimal span ID to hexadecimal
+	spanIDDecimal, err := strconv.ParseUint(spanIDStr, 10, 64)
+	if err != nil {
+		zap.L().Warn("failed to parse span ID as decimal",
+			zap.String("span_id", spanIDStr),
+			zap.Error(err),
+		)
+		return nil
+	}
+
+	spanIDHex := strconv.FormatUint(spanIDDecimal, 16)
+
+	// Create new metadata with B3 headers added
+	newMD := metadata.Join(md, metadata.New(map[string]string{
+		headerB3TraceID: traceID,
+		headerB3SpanID:  spanIDHex,
+		headerB3Sampled: "1",
+	}))
+
+	return &newMD
 }
