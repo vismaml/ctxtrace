@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	headerRequestID = "x-request-id"
+	headerRequestID  = "x-request-id"
+	headerCloudTrace = "x-cloud-trace-context"
+	headerB3TraceID  = "x-b3-traceid"
 )
 
 // TraceData is a simple struct to hold both the RequestID and the B3 TraceSpan
@@ -132,13 +134,44 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 	if !mdOK {
 		return ctx
 	}
+
 	data := TraceData{}
+
+	// Check what headers we have for logging
+	hasB3 := len(md[headerB3TraceID]) > 0
+	hasCloudTrace := len(md[headerCloudTrace]) > 0
+
+	// Log the header types detected
+	if hasB3 && hasCloudTrace {
+		zap.L().Info("incoming request has both trace formats",
+			zap.Bool("has_b3_headers", hasB3),
+			zap.Bool("has_cloud_trace_headers", hasCloudTrace),
+		)
+	} else if hasB3 {
+		zap.L().Info("incoming request has B3 trace headers")
+	} else if hasCloudTrace {
+		zap.L().Info("incoming request has Cloud Trace headers")
+	} else {
+		zap.L().Debug("incoming request has no trace headers")
+	}
+
 	span, err := b3.ExtractGRPC(&md)()
 	if err != nil {
-		zap.L().Warn("b3 extract failed", zap.Error(err))
+		if hasCloudTrace {
+			zap.L().Warn("b3 extract failed but cloud trace headers present",
+				zap.Error(err),
+				zap.Strings("cloud_trace_headers", md[headerCloudTrace]),
+			)
+		} else {
+			zap.L().Warn("b3 extract failed", zap.Error(err))
+		}
 	} else {
 		data.TraceSpan = span
 		ctx = addOtelSpanContextToContext(ctx, data)
+		zap.L().Info("b3 trace extraction successful",
+			zap.String("trace_id", span.TraceID.String()),
+			zap.String("span_id", span.ID.String()),
+		)
 	}
 
 	if mdValue, ok := md[headerRequestID]; ok && len(mdValue) != 0 {
