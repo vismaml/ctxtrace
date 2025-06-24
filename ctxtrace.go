@@ -135,11 +135,7 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 	data := TraceData{}
 	span, err := b3.ExtractGRPC(&md)()
 	if err != nil {
-		if err.Error() == "empty request context" {
-			zap.L().Debug("b3 extract failed", zap.Error(err))
-		} else {
-			zap.L().Warn("b3 extract failed", zap.Error(err))
-		}
+		zap.L().Warn("b3 extract failed", zap.Error(err))
 	} else {
 		data.TraceSpan = span
 		ctx = addOtelSpanContextToContext(ctx, data)
@@ -178,12 +174,7 @@ func packCallerMetadata(m *metadata.MD, data TraceData) {
 	if data.TraceSpan != nil {
 		err := b3.InjectGRPC(m)(*data.TraceSpan)
 		if err != nil {
-			if err.Error() == "empty request context" {
-				zap.L().Debug("b3 injection failed", zap.Error(err))
-			} else {
-				zap.L().Warn("b3 injection failed", zap.Error(err))
-			}
-			// Dont pollute logs with this error, it is not critical
+			zap.L().Warn("b3 injection failed", zap.Error(err))
 		}
 	}
 	if data.RequestID != "" {
