@@ -35,54 +35,7 @@ type traceCtxMarker struct{}
 // UnaryServerInterceptor for propagating client information
 func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if !ok {
-			return handler(ctx, req)
-		}
-
-		// Check if we have Cloud Trace but no B3
-		cloudTraceHeaders := md["x-cloud-trace-context"]
-		b3TraceHeaders := md["x-b3-traceid"]
-
-		if len(cloudTraceHeaders) > 0 && len(b3TraceHeaders) == 0 {
-			// Parse Google Cloud Trace format: "TRACE_ID/SPAN_ID;o=OPTIONS"
-			parts := strings.Split(cloudTraceHeaders[0], "/")
-			if len(parts) >= 2 {
-				traceID := parts[0]
-				spanParts := strings.Split(parts[1], ";")
-				spanIDStr := spanParts[0]
-
-				// Convert decimal span ID to hexadecimal
-				spanIDDecimal, err := strconv.ParseUint(spanIDStr, 10, 64)
-				if err != nil {
-					zap.L().Warn("failed to parse span ID as decimal",
-						zap.String("span_id", spanIDStr),
-						zap.Error(err),
-					)
-					return handler(ctx, req)
-				}
-
-				spanIDHex := strconv.FormatUint(spanIDDecimal, 16)
-
-				// Convert to B3 format and add to metadata
-				newMD := metadata.Join(md, metadata.New(map[string]string{
-					"x-b3-traceid": traceID,
-					"x-b3-spanid":  spanIDHex,
-					"x-b3-sampled": "1",
-				}))
-
-				ctx = metadata.NewIncomingContext(ctx, newMD)
-
-				zap.L().Debug("converted cloud trace to b3",
-					zap.String("method", info.FullMethod),
-					zap.String("cloud_trace", cloudTraceHeaders[0]),
-					zap.String("b3_traceid", traceID),
-					zap.String("span_id_decimal", spanIDStr),
-					zap.String("b3_spanid_hex", spanIDHex),
-				)
-			}
-		}
-
+		ctx = convertCloudTraceHeadersToB3(ctx)
 		ctx = extractMetadataToContext(ctx)
 
 		return handler(ctx, req)
@@ -243,4 +196,43 @@ func packCallerMetadata(m *metadata.MD, data TraceData) {
 // WithValue Creates context with TraceData values
 func WithValue(ctx context.Context, traceData TraceData) context.Context {
 	return context.WithValue(ctx, traceCtxMarker{}, traceData)
+}
+
+func convertCloudTraceHeadersToB3(ctx context.Context) context.Context {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ctx
+	}
+
+	cloudTraceHeaders := md["x-cloud-trace-context"]
+	b3TraceHeaders := md["x-b3-traceid"]
+
+	if len(cloudTraceHeaders) > 0 && len(b3TraceHeaders) == 0 {
+		parts := strings.Split(cloudTraceHeaders[0], "/")
+		if len(parts) >= 2 {
+			traceID := parts[0]
+			spanParts := strings.Split(parts[1], ";")
+			spanIDStr := spanParts[0]
+
+			spanIDDecimal, err := strconv.ParseUint(spanIDStr, 10, 64)
+			if err != nil {
+				zap.L().Warn("failed to parse span ID as decimal",
+					zap.String("span_id", spanIDStr),
+					zap.Error(err),
+				)
+				return ctx
+			}
+
+			spanIDHex := strconv.FormatUint(spanIDDecimal, 16)
+
+			newMD := metadata.Join(md, metadata.New(map[string]string{
+				"x-b3-traceid": traceID,
+				"x-b3-spanid":  spanIDHex,
+				"x-b3-sampled": "1",
+			}))
+
+			ctx = metadata.NewIncomingContext(ctx, newMD)
+		}
+	}
+	return ctx
 }
