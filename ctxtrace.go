@@ -2,6 +2,7 @@ package ctxtrace
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,6 +48,7 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 func StreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx := stream.Context()
+		ctx = convertCloudTraceHeadersToB3(ctx)
 		wrapped := grpc_middleware.WrapServerStream(stream)
 		wrapped.WrappedContext = extractMetadataToContext(ctx)
 
@@ -211,6 +213,16 @@ func convertCloudTraceHeadersToB3(ctx context.Context) context.Context {
 		parts := strings.Split(cloudTraceHeaders[0], "/")
 		if len(parts) >= 2 {
 			traceID := parts[0]
+
+			// Validate trace ID is 32 hex characters
+			if len(traceID) != 32 {
+				zap.L().Warn("invalid trace ID length",
+					zap.String("trace_id", traceID),
+					zap.Int("length", len(traceID)),
+				)
+				return ctx
+			}
+
 			spanParts := strings.Split(parts[1], ";")
 			spanIDStr := spanParts[0]
 
@@ -223,12 +235,22 @@ func convertCloudTraceHeadersToB3(ctx context.Context) context.Context {
 				return ctx
 			}
 
-			spanIDHex := strconv.FormatUint(spanIDDecimal, 16)
+			// B3 span ID must be exactly 16 hex characters
+			spanIDHex := fmt.Sprintf("%016x", spanIDDecimal)
+
+			// Parse sampling decision from Cloud Trace header
+			samplingFlag := "0"
+			if len(parts) >= 2 && len(spanParts) >= 2 {
+				options := spanParts[1]
+				if strings.Contains(options, "o=1") {
+					samplingFlag = "1"
+				}
+			}
 
 			newMD := metadata.Join(md, metadata.New(map[string]string{
 				"x-b3-traceid": traceID,
 				"x-b3-spanid":  spanIDHex,
-				"x-b3-sampled": "1",
+				"x-b3-sampled": samplingFlag,
 			}))
 
 			ctx = metadata.NewIncomingContext(ctx, newMD)
