@@ -6,9 +6,6 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
-	"github.com/openzipkin/zipkin-go/model"
-	"github.com/openzipkin/zipkin-go/propagation/b3"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -18,10 +15,9 @@ const (
 	headerRequestID = "x-request-id"
 )
 
-// TraceData is a simple struct to hold both the RequestID and the B3 TraceSpan
+// TraceData is a simple struct to hold the RequestID
 type TraceData struct {
 	RequestID string
-	TraceSpan *model.SpanContext
 }
 
 type traceCtxMarker struct{}
@@ -80,11 +76,6 @@ func ExtractHTTP(r *http.Request) (TraceData, error) {
 	if reqID := r.Header.Get(headerRequestID); reqID != "" {
 		data.RequestID = reqID
 	}
-	span, err := b3.ExtractHTTP(r)()
-	if err != nil {
-		return data, err
-	}
-	data.TraceSpan = span
 	return data, nil
 }
 
@@ -94,38 +85,6 @@ func ExtractHTTPToContext(ctx context.Context, r *http.Request) context.Context 
 	return context.WithValue(ctx, traceCtxMarker{}, data)
 }
 
-func addOtelSpanContextToContext(ctx context.Context, traceData TraceData) context.Context {
-	traceIDString := traceData.TraceSpan.TraceID.String()
-	traceID, err := trace.TraceIDFromHex(traceIDString)
-	if err != nil {
-		return ctx
-	}
-
-	spanIDString := traceData.TraceSpan.ID.String()
-	spanID, err := trace.SpanIDFromHex(spanIDString)
-	if err != nil {
-		return ctx
-	}
-
-	traceFlags := trace.TraceFlags(0)
-	if *traceData.TraceSpan.Sampled {
-		traceFlags = trace.FlagsSampled
-	}
-	spanContext := trace.NewSpanContext(
-		//TODO: add tracestate, remote
-		trace.SpanContextConfig{
-			TraceID:    traceID,
-			SpanID:     spanID,
-			TraceFlags: traceFlags,
-		},
-	)
-	if !spanContext.IsValid() {
-		return ctx
-	}
-
-	return trace.ContextWithRemoteSpanContext(ctx, spanContext)
-}
-
 // finds caller information in the gRPC metadata and adds it to the context
 func extractMetadataToContext(ctx context.Context) context.Context {
 	md, mdOK := metadata.FromIncomingContext(ctx)
@@ -133,17 +92,6 @@ func extractMetadataToContext(ctx context.Context) context.Context {
 		return ctx
 	}
 	data := TraceData{}
-	span, err := b3.ExtractGRPC(&md)()
-	if err != nil {
-		if err.Error() == "empty request context" {
-			zap.L().Debug("b3 extract failed", zap.Error(err))
-		} else {
-			zap.L().Warn("b3 extract failed", zap.Error(err))
-		}
-	} else {
-		data.TraceSpan = span
-		ctx = addOtelSpanContextToContext(ctx, data)
-	}
 
 	if mdValue, ok := md[headerRequestID]; ok && len(mdValue) != 0 {
 		data.RequestID = mdValue[0]
@@ -174,17 +122,6 @@ func InjectDataIntoOutMetadata(ctx context.Context, data TraceData) metadata.MD 
 func packCallerMetadata(m *metadata.MD, data TraceData) {
 	if m == nil {
 		zap.L().Fatal("metadata is nil", zap.Stack("stack"))
-	}
-	if data.TraceSpan != nil {
-		err := b3.InjectGRPC(m)(*data.TraceSpan)
-		if err != nil {
-			if err.Error() == "empty request context" {
-				zap.L().Debug("b3 injection failed", zap.Error(err))
-			} else {
-				zap.L().Warn("b3 injection failed", zap.Error(err))
-			}
-			// Dont pollute logs with this error, it is not critical
-		}
 	}
 	if data.RequestID != "" {
 		m.Set(headerRequestID, data.RequestID)
