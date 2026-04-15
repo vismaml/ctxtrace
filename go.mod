@@ -1,8 +1,6 @@
 module github.com/e-conomic/ctxtrace
 
-go 1.24.0
-
-toolchain go1.24.1
+go 1.26.2
 
 require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.0
