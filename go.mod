@@ -1,4 +1,4 @@
-module github.com/vml/ctxtrace
+module github.com/vismaml/ctxtrace
 
 go 1.26.2
 
