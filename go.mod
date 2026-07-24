@@ -1,4 +1,4 @@
-module github.com/e-conomic/ctxtrace
+module github.com/vml/ctxtrace
 
 go 1.26.2
 
