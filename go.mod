@@ -1,6 +1,6 @@
 module github.com/vismaml/ctxtrace
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.0
